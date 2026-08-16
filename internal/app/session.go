@@ -65,14 +65,20 @@ func stateFor(token string) (*ningen.State, func(), bool, error) {
 	return connected, closeState, false, err
 }
 
-// oneShotHint nudges the agent toward the daemon, because repeatedly opening and
-// closing a gateway connection is the least browser-like thing this CLI does.
+// oneShotHint explains why this command opened a gateway connection of its own,
+// which now only happens when the daemon was refused or could not start.
+// Reconnecting per command is the least browser-like thing this CLI does.
 func oneShotHint(persistent bool) []string {
 	if persistent {
 		return nil
 	}
+	if !autoStartEnabled() {
+		return []string{
+			NoDaemonEnvVar + " is set, so this opened its own gateway connection; unset it to share one background session",
+		}
+	}
 	return []string{
-		"Run `" + axi.Binary() + " daemon run` to keep one connection open instead of reconnecting per command",
+		"This opened its own gateway connection because the daemon could not start; see " + axi.CollapseHome(daemonLogPath()),
 	}
 }
 

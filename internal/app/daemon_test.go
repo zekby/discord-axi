@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zekby/discord-axi/internal/axi"
 )
@@ -79,12 +80,55 @@ func TestForwardToDaemonSurfacesDaemonErrors(t *testing.T) {
 	}
 }
 
-func TestCommandsFallBackWhenNoDaemonIsListening(t *testing.T) {
+func TestCommandsFallBackWhenAutoStartIsRefused(t *testing.T) {
 	t.Setenv("XDG_RUNTIME_DIR", shortTempDir(t))
+	t.Setenv(NoDaemonEnvVar, "1")
 
 	doc, served, err := forwardToDaemon("unread", nil)
 	if served || doc != nil || err != nil {
 		t.Fatalf("served = %v, doc = %v, err = %v, want a clean fall-through", served, doc, err)
+	}
+	if autoStartEnabled() {
+		t.Fatal(NoDaemonEnvVar + " must switch auto-start off")
+	}
+}
+
+func TestAutoStartGivesUpQuietlyWithoutCredentials(t *testing.T) {
+	t.Setenv("XDG_RUNTIME_DIR", shortTempDir(t))
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv(TokenEnvVar, "")
+	t.Setenv("PATH", "") // keeps the keyring helper out of the test
+
+	start := time.Now()
+	_, served, err := forwardToDaemon("unread", nil)
+	if served || err != nil {
+		t.Fatalf("served = %v, err = %v, want a fall-through the command can recover from", served, err)
+	}
+	// It must refuse before spawning anything, not wait out the startup window.
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("took %s to decline; it should never have spawned a child", elapsed)
+	}
+}
+
+func TestIdleFlagParsing(t *testing.T) {
+	command := daemonCommand()
+
+	inv, err := command.Parse([]string{"start"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if idle, err := idleTimeout(inv); err != nil || idle != defaultIdleTimeout {
+		t.Fatalf("default idle = %s, err = %v, want %s", idle, err, defaultIdleTimeout)
+	}
+
+	inv, _ = command.Parse([]string{"start", "--idle", "0"})
+	if idle, err := idleTimeout(inv); err != nil || idle != 0 {
+		t.Fatalf("idle = %s, err = %v, want 0 to mean stay up", idle, err)
+	}
+
+	inv, _ = command.Parse([]string{"start", "--idle", "soon"})
+	if _, err := idleTimeout(inv); err == nil || axi.ExitCode(err) != axi.ExitUsage {
+		t.Fatalf("err = %v, want a usage error", err)
 	}
 }
 
@@ -118,5 +162,101 @@ func TestStopIsANoOpWhenNothingIsRunning(t *testing.T) {
 	}
 	if !strings.Contains(doc.Encode(), "(no-op)") {
 		t.Fatalf("stopping nothing must be a no-op:\n%s", doc.Encode())
+	}
+}
+
+// listenForTest gives serveDaemon a socket without needing Discord.
+func listenForTest(t *testing.T) net.Listener {
+	t.Helper()
+	t.Setenv("XDG_RUNTIME_DIR", shortTempDir(t))
+	listener, err := net.Listen("unix", SocketPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { listener.Close() })
+	return listener
+}
+
+func TestDaemonShutsDownWhenLeftIdle(t *testing.T) {
+	listener := listenForTest(t)
+
+	done := make(chan string, 1)
+	go func() {
+		_, reason := serveDaemon(listener, 300*time.Millisecond, nil)
+		done <- reason
+	}()
+
+	select {
+	case reason := <-done:
+		if !strings.Contains(reason, "idle") {
+			t.Fatalf("reason = %q, want the idle timeout", reason)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("an idle daemon must shut itself down")
+	}
+}
+
+func TestEachRequestResetsTheIdleClock(t *testing.T) {
+	listener := listenForTest(t)
+
+	const idle = 600 * time.Millisecond
+	started := time.Now()
+	done := make(chan time.Duration, 1)
+	go func() {
+		uptime, _ := serveDaemon(listener, idle, nil)
+		done <- uptime
+	}()
+
+	time.Sleep(400 * time.Millisecond)
+	connection, err := net.Dial("unix", SocketPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = json.NewEncoder(connection).Encode(daemonRequest{Command: "__ping"})
+	var response daemonResponse
+	if err := json.NewDecoder(connection).Decode(&response); err != nil {
+		t.Fatal(err)
+	}
+	connection.Close()
+	if !strings.Contains(response.Output, "running") {
+		t.Fatalf("ping answered %q", response.Output)
+	}
+
+	select {
+	case uptime := <-done:
+		if uptime < 900*time.Millisecond {
+			t.Fatalf("shut down after %s; the request at 400ms should have pushed it past %s",
+				uptime, 400*time.Millisecond+idle)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("did not shut down at all, %s after start", time.Since(started))
+	}
+}
+
+func TestDaemonStopsOnRequest(t *testing.T) {
+	listener := listenForTest(t)
+
+	done := make(chan string, 1)
+	go func() {
+		_, reason := serveDaemon(listener, 0, nil)
+		done <- reason
+	}()
+
+	connection, err := net.Dial("unix", SocketPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = json.NewEncoder(connection).Encode(daemonRequest{Command: "__stop"})
+	var response daemonResponse
+	_ = json.NewDecoder(connection).Decode(&response)
+	connection.Close()
+
+	select {
+	case reason := <-done:
+		if reason != "asked to stop" {
+			t.Fatalf("reason = %q", reason)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("`daemon stop` must end the accept loop")
 	}
 }

@@ -93,17 +93,29 @@ user token allowed — it only removes the noise a real browser would never make
 
 **One connection, not one per command.** Read state needs the gateway, and
 connecting then disconnecting for every `unread` is nothing like a browser that
-stays online for hours. Run the daemon and it holds a single session:
+stays online for hours. So the first `unread` or `read` starts a daemon by
+itself, in the background, and every later call is answered over its socket
+without opening anything:
 
 ```sh
-discord-axi daemon run &     # or a systemd user unit / launchd agent
+discord-axi unread           # starts the daemon if none is up, then uses it
 discord-axi daemon status
-discord-axi unread           # served over the socket, no new connection
 discord-axi daemon stop
 ```
 
-Without a daemon these commands still work; they just connect each time, and say
-so in their help output.
+Nothing to remember and nothing to background by hand. The daemon shuts itself
+down after 30 minutes without a request, so it does not linger:
+
+```sh
+discord-axi daemon start --idle 120   # start it yourself, two hour idle timeout
+discord-axi daemon start --idle 0     # stay up until stopped
+discord-axi daemon run                # hold it in the foreground instead
+DISCORD_AXI_NO_DAEMON=1 discord-axi unread   # never start one
+```
+
+With auto-start refused or failing, the commands still work; they open a
+connection of their own and say so in their output. Its log is at
+`~/.local/state/discord-axi/daemon.log`.
 
 **Paced requests.** Every REST call takes a slot from a lock file shared by all
 `discord-axi` processes, so an agent firing twenty commands at once still sends

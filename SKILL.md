@@ -41,7 +41,7 @@ commands[16]{name,effect,usage,description}:
   search,read,"discord-axi search \"My Server\" --content \"deploy failed\"",Search a guild's message history (user accounts only)
   unread,read,discord-axi unread,List channels with unread messages and mentions (user accounts only)
   read,write,discord-axi read 1234567890,Mark a channel read up to its latest message (user accounts only)
-  daemon,read,discord-axi daemon run,Hold one long-lived gateway connection and serve read commands from it
+  daemon,read,discord-axi daemon start,Hold one long-lived gateway connection and serve read commands from it
   setup,read,discord-axi setup hooks,"Install the session-start hooks, or write the installable skill file"
 ```
 
@@ -80,7 +80,7 @@ Run `discord-axi <command> --help` for the flags of one command.
 - Message lists are chronological, oldest first, and long bodies are truncated; `--full` prints them whole.
 - `--limit` on `messages` caps at 100; page further back with `--before <id>`.
 - `search`, `unread` and `read` need a user token: Discord does not give bots search or read state.
-- `unread` and `read` open a gateway connection. Start `discord-axi daemon run` once and they reuse a single long-lived session instead.
+- `unread` and `read` need a gateway connection, so the first one starts a background daemon and every later call reuses it. Nothing to set up; it exits after 30 idle minutes. `DISCORD_AXI_NO_DAEMON=1` opts out, `discord-axi daemon status` and `daemon stop` inspect and end it.
 - Requests are paced about a second apart across all processes, so a batch of commands takes a while on purpose. `DISCORD_AXI_MIN_INTERVAL_MS` tunes it.
 - Exit codes: 0 for success and no-ops, 1 for errors, 2 for usage errors.
 - Every write command repeats its own warning under `caution` in `--help`.

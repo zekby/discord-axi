@@ -96,7 +96,7 @@ ask before running a write command rather than assuming consent to the risk.**
 - Message lists are chronological, oldest first, and long bodies are truncated; ` + "`--full`" + ` prints them whole.
 - ` + "`--limit`" + ` on ` + "`messages`" + ` caps at 100; page further back with ` + "`--before <id>`" + `.
 - ` + "`search`" + `, ` + "`unread`" + ` and ` + "`read`" + ` need a user token: Discord does not give bots search or read state.
-- ` + "`unread`" + ` and ` + "`read`" + ` open a gateway connection. Start ` + "`discord-axi daemon run`" + ` once and they reuse a single long-lived session instead.
+- ` + "`unread`" + ` and ` + "`read`" + ` need a gateway connection, so the first one starts a background daemon and every later call reuses it. Nothing to set up; it exits after 30 idle minutes. ` + "`DISCORD_AXI_NO_DAEMON=1`" + ` opts out, ` + "`discord-axi daemon status`" + ` and ` + "`daemon stop`" + ` inspect and end it.
 - Requests are paced about a second apart across all processes, so a batch of commands takes a while on purpose. ` + "`DISCORD_AXI_MIN_INTERVAL_MS`" + ` tunes it.
 - Exit codes: 0 for success and no-ops, 1 for errors, 2 for usage errors.
 - Every write command repeats its own warning under ` + "`caution`" + ` in ` + "`--help`" + `.
