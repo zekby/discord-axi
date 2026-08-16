@@ -241,15 +241,15 @@ func guildsCommand() *axi.Command {
 		},
 		Examples: []string{"discord-axi guilds", "discord-axi guilds --fields members"},
 		Run: func(inv *axi.Invocation) (*axi.Doc, error) {
-			client, _, err := Client(inv)
-			if err != nil {
-				return nil, err
-			}
 			limit, err := inv.Uint("--limit")
 			if err != nil {
 				return nil, err
 			}
 			fields, err := guildFields.selected(inv)
+			if err != nil {
+				return nil, err
+			}
+			client, _, err := Client(inv)
 			if err != nil {
 				return nil, err
 			}
@@ -295,15 +295,15 @@ func channelsCommand() *axi.Command {
 		},
 		Examples: []string{`discord-axi channels "My Server"`, "discord-axi channels 1234567890 --type text"},
 		Run: func(inv *axi.Invocation) (*axi.Doc, error) {
-			client, _, err := Client(inv)
-			if err != nil {
-				return nil, err
-			}
 			limit, err := inv.Uint("--limit")
 			if err != nil {
 				return nil, err
 			}
 			fields, err := channelFields.selected(inv)
+			if err != nil {
+				return nil, err
+			}
+			client, _, err := Client(inv)
 			if err != nil {
 				return nil, err
 			}
@@ -374,11 +374,11 @@ func dmsCommand() *axi.Command {
 		},
 		Examples: []string{"discord-axi dms"},
 		Run: func(inv *axi.Invocation) (*axi.Doc, error) {
-			client, credentials, err := Client(inv)
+			limit, err := inv.Uint("--limit")
 			if err != nil {
 				return nil, err
 			}
-			limit, err := inv.Uint("--limit")
+			client, credentials, err := Client(inv)
 			if err != nil {
 				return nil, err
 			}
@@ -429,10 +429,6 @@ func messagesCommand() *axi.Command {
 			"discord-axi messages 1234567890 --limit 50 --fields reactions,url",
 		},
 		Run: func(inv *axi.Invocation) (*axi.Doc, error) {
-			client, _, err := Client(inv)
-			if err != nil {
-				return nil, err
-			}
 			limit, err := inv.Uint("--limit")
 			if err != nil {
 				return nil, err
@@ -443,6 +439,10 @@ func messagesCommand() *axi.Command {
 					"Run `"+axi.Binary()+` messages "`+inv.Arg(0)+`" --before <oldest-id>`+"` to page further back")
 			}
 			fields, err := messageFields.selected(inv)
+			if err != nil {
+				return nil, err
+			}
+			client, _, err := Client(inv)
 			if err != nil {
 				return nil, err
 			}
@@ -533,18 +533,6 @@ func sendCommand() *axi.Command {
 			`discord-axi send 1234567890 --content "on it" --reply 9876543210`,
 		},
 		Run: func(inv *axi.Invocation) (*axi.Doc, error) {
-			client, credentials, err := Client(inv)
-			if err != nil {
-				return nil, err
-			}
-			if err := RequireWrite(credentials); err != nil {
-				return nil, err
-			}
-			channel, err := ResolveChannel(client, inv.Arg(0))
-			if err != nil {
-				return nil, err
-			}
-
 			data := api.SendMessageData{Content: inv.String("--content")}
 			if raw := inv.String("--reply"); raw != "" {
 				id, parseErr := discord.ParseSnowflake(raw)
@@ -565,6 +553,18 @@ func sendCommand() *axi.Command {
 				}
 				defer file.Close()
 				data.Files = []sendpart.File{{Name: filepath.Base(path), Reader: file}}
+			}
+
+			client, credentials, err := Client(inv)
+			if err != nil {
+				return nil, err
+			}
+			if err := RequireWrite(credentials); err != nil {
+				return nil, err
+			}
+			channel, err := ResolveChannel(client, inv.Arg(0))
+			if err != nil {
+				return nil, err
 			}
 
 			message, err := client.SendMessageComplex(channel.Channel.ID, data)
@@ -589,6 +589,10 @@ func editCommand() *axi.Command {
 		},
 		Examples: []string{`discord-axi edit "My Server/general" 9876543210 --content "fixed typo"`},
 		Run: func(inv *axi.Invocation) (*axi.Doc, error) {
+			messageID, err := messageArg(inv)
+			if err != nil {
+				return nil, err
+			}
 			client, credentials, err := Client(inv)
 			if err != nil {
 				return nil, err
@@ -596,7 +600,7 @@ func editCommand() *axi.Command {
 			if err := RequireWrite(credentials); err != nil {
 				return nil, err
 			}
-			channel, messageID, err := channelAndMessage(client, inv)
+			channel, err := ResolveChannel(client, inv.Arg(0))
 			if err != nil {
 				return nil, err
 			}
@@ -618,6 +622,10 @@ func deleteCommand() *axi.Command {
 		Args:     []axi.Arg{{Name: "channel", Required: true}, {Name: "message", Required: true}},
 		Examples: []string{`discord-axi delete "My Server/general" 9876543210`},
 		Run: func(inv *axi.Invocation) (*axi.Doc, error) {
+			messageID, err := messageArg(inv)
+			if err != nil {
+				return nil, err
+			}
 			client, credentials, err := Client(inv)
 			if err != nil {
 				return nil, err
@@ -625,7 +633,7 @@ func deleteCommand() *axi.Command {
 			if err := RequireWrite(credentials); err != nil {
 				return nil, err
 			}
-			channel, messageID, err := channelAndMessage(client, inv)
+			channel, err := ResolveChannel(client, inv.Arg(0))
 			if err != nil {
 				return nil, err
 			}
@@ -657,6 +665,10 @@ func reactCommand() *axi.Command {
 			`discord-axi react 1234567890 9876543210 --emoji "✅" --remove`,
 		},
 		Run: func(inv *axi.Invocation) (*axi.Doc, error) {
+			messageID, err := messageArg(inv)
+			if err != nil {
+				return nil, err
+			}
 			client, credentials, err := Client(inv)
 			if err != nil {
 				return nil, err
@@ -664,7 +676,7 @@ func reactCommand() *axi.Command {
 			if err := RequireWrite(credentials); err != nil {
 				return nil, err
 			}
-			channel, messageID, err := channelAndMessage(client, inv)
+			channel, err := ResolveChannel(client, inv.Arg(0))
 			if err != nil {
 				return nil, err
 			}
@@ -703,6 +715,10 @@ func searchCommand() *axi.Command {
 		},
 		Examples: []string{`discord-axi search "My Server" --content "deploy failed"`},
 		Run: func(inv *axi.Invocation) (*axi.Doc, error) {
+			limit, err := inv.Uint("--limit")
+			if err != nil {
+				return nil, err
+			}
 			client, credentials, err := Client(inv)
 			if err != nil {
 				return nil, err
@@ -710,10 +726,6 @@ func searchCommand() *axi.Command {
 			if credentials.IsBot() {
 				return nil, axi.Fail("FORBIDDEN", "Discord does not offer message search to bot accounts",
 					"Run `"+axi.Binary()+` messages "<guild>/<channel>" --limit 100`+"` and filter the output")
-			}
-			limit, err := inv.Uint("--limit")
-			if err != nil {
-				return nil, err
 			}
 			guild, err := ResolveGuild(client, inv.Arg(0))
 			if err != nil {
@@ -767,15 +779,13 @@ func searchCommand() *axi.Command {
 	}
 }
 
-func channelAndMessage(client *api.Client, inv *axi.Invocation) (ChannelRef, discord.MessageID, error) {
+// messageArg parses the message id out of argv, before anything that could
+// fail on the account, so a mistyped id is always a usage error.
+func messageArg(inv *axi.Invocation) (discord.MessageID, error) {
 	id, err := discord.ParseSnowflake(inv.Arg(1))
 	if err != nil {
-		return ChannelRef{}, 0, axi.Usage(`<message> must be a message id, got "`+inv.Arg(1)+`"`,
+		return 0, axi.Usage(`<message> must be a message id, got "`+inv.Arg(1)+`"`,
 			"Run `"+axi.Binary()+` messages "`+inv.Arg(0)+`"`+"` and reuse an id from the output")
 	}
-	channel, err := ResolveChannel(client, inv.Arg(0))
-	if err != nil {
-		return ChannelRef{}, 0, err
-	}
-	return channel, discord.MessageID(id), nil
+	return discord.MessageID(id), nil
 }

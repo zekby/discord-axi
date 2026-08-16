@@ -174,7 +174,10 @@ func authCommand() *axi.Command {
 	return &axi.Command{
 		Name: "auth",
 		Desc: "List stored accounts, pick the default, or change what one may do",
-		Args: []axi.Arg{{Name: "action", Required: true}, {Name: "account", Required: false}},
+		Args: []axi.Arg{
+			{Name: "action", Required: true, Values: []string{"list", "use", "scope"}},
+			{Name: "account", Required: false},
+		},
 		Flags: []axi.Flag{
 			{Name: "--read", Desc: "For `auth scope`: forbid writes"},
 			{Name: "--write", Desc: "For `auth scope`: allow writes"},

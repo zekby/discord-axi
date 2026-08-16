@@ -15,12 +15,14 @@ var renamedFlags = map[string]string{
 	"--count":   "--limit",
 	"--max":     "--limit",
 	"--query":   "--content",
-	"--channel": "--content",
 }
 
 type Arg struct {
 	Name     string
 	Required bool
+	// Values lists what the argument accepts, for arguments that dispatch to a
+	// fixed set of actions. Empty means the argument is free-form.
+	Values []string
 }
 
 type Flag struct {
@@ -91,10 +93,23 @@ func (i *Invocation) Uint(flag string) (uint, error) {
 	if err != nil || value == 0 {
 		return 0, Usage(
 			flag+` must be a positive integer, got "`+raw+`"`,
-			"Run `"+Binary()+" "+i.Command.Name+" "+flag+" 30`",
+			"Run `"+Binary()+" "+i.Command.Name+" "+flag+" "+i.defaultOf(flag)+"`",
 		)
 	}
 	return uint(value), nil
+}
+
+// defaultOf is the value a flag falls back to, so a suggestion never proposes a
+// number the command would reject.
+func (i *Invocation) defaultOf(name string) string {
+	if i.Command != nil {
+		for _, flag := range i.Command.Flags {
+			if flag.Name == name && flag.Default != "" {
+				return flag.Default
+			}
+		}
+	}
+	return "10"
 }
 
 // Parse validates argv against the command spec before any dependency call. An
@@ -154,8 +169,11 @@ func (c *Command) Parse(args []string, globals ...Flag) (*Invocation, error) {
 	}
 	for index, arg := range c.Args {
 		if arg.Required && index >= len(inv.Positional) {
-			return nil, Usage("<"+arg.Name+"> is required for `"+c.Name+"`",
-				"Run `"+c.Usage()+"`")
+			help := []string{"Run `" + c.Usage() + "`"}
+			if len(arg.Values) > 0 {
+				help = append(help, "valid "+arg.Name+" values: "+strings.Join(arg.Values, ", "))
+			}
+			return nil, Usage("<"+arg.Name+"> is required for `"+c.Name+"`", help...)
 		}
 	}
 	for _, flag := range c.Flags {
@@ -190,7 +208,10 @@ func (c *Command) unknownFlag(name string, globals []Flag) error {
 				name+" is not a flag of this CLI; use "+replacement+" instead")
 		}
 	}
-	help := []string{"valid flags for `" + c.Name + "`: " + c.flagNames() + " (--help always allowed)"}
+	help := []string{
+		"valid flags for `" + c.Name + "`: " + c.flagNames() + " (--help always allowed)",
+		"Run `" + c.Usage() + "`",
+	}
 	for _, flag := range c.Flags {
 		help = append(help, flag.Name+flagPlaceholder(flag)+" — "+flag.Desc)
 	}
@@ -234,7 +255,11 @@ func (c *Command) argUsage() string {
 func (c *Command) Usage() string {
 	parts := []string{Binary(), c.Name}
 	for _, arg := range c.Args {
-		parts = append(parts, "<"+arg.Name+">")
+		if arg.Required {
+			parts = append(parts, "<"+arg.Name+">")
+			continue
+		}
+		parts = append(parts, "["+arg.Name+"]")
 	}
 	for _, flag := range c.Flags {
 		if flag.Required {

@@ -102,10 +102,10 @@ func App(version string) *axi.App {
 func setupCommand() *axi.Command {
 	return &axi.Command{
 		Name: "setup",
-		Desc: "Install the session-start hooks, or write the installable skill file",
-		Args: []axi.Arg{{Name: "target", Required: true}},
+		Desc: "Install the session-start hooks, or regenerate this repository's SKILL.md",
+		Args: []axi.Arg{{Name: "target", Required: true, Values: []string{"hooks", "skill"}}},
 		Flags: []axi.Flag{
-			{Name: "--path", Value: "path", Desc: "Where `setup skill` writes SKILL.md", Default: "SKILL.md"},
+			{Name: "--path", Value: "path", Desc: "Where `setup skill` writes the file", Default: "SKILL.md"},
 			{Name: "--check", Desc: "For `setup skill`: fail if the file is stale instead of writing it"},
 		},
 		Examples: []string{"discord-axi setup hooks", "discord-axi setup skill --path SKILL.md"},
@@ -118,7 +118,8 @@ func setupCommand() *axi.Command {
 			default:
 				return nil, axi.Usage(`unknown setup target "`+inv.Arg(0)+`"`,
 					"Run `"+axi.Binary()+" setup hooks` to register session-start context",
-					"Run `"+axi.Binary()+" setup skill` to write SKILL.md")
+					"Run `"+axi.Binary()+" setup skill` to regenerate this repository's SKILL.md",
+					"To install the skill instead, run `"+SkillInstallCommand+"`")
 			}
 		},
 	}
@@ -150,7 +151,7 @@ func installHooks() (*axi.Doc, error) {
 	}
 	return doc.Set("help", []string{
 		"Start a new agent session to see the Discord home view in its initial context",
-		"Run `" + axi.Binary() + " setup skill` to also install the on-demand skill file",
+		"The on-demand skill is a separate, optional path: `" + SkillInstallCommand + "`",
 	}), nil
 }
 
@@ -170,5 +171,11 @@ func writeSkill(path string, check bool) (*axi.Doc, error) {
 	}
 	return axi.NewDoc().
 		Set("skill", "wrote "+axi.CollapseHome(path)).
-		Set("help", []string{"Commit the file so agents can install it with `npx skills add <owner>/<repo>`"}), nil
+		Set("help", []string{
+			// Running this outside the repository is the common mistake, and the
+			// stray file it leaves behind explains nothing on its own.
+			"This regenerates the repository's own skill file; commit it there",
+			"To install the skill on this machine instead, run `" + SkillInstallCommand + "`",
+			"To start every agent session with the account and its guilds, run `" + axi.Binary() + " setup hooks`",
+		}), nil
 }

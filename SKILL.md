@@ -21,8 +21,11 @@ is refused before it leaves the machine. **User tokens default to `read`**; wide
 one with `discord-axi auth scope <name> --write` only when the user asks.
 
 Secrets live in the system keyring (`--store file` writes a 0600 file instead); the
-account index never holds the token. `--account <name>` works on every command and
-DISCORD_AXI_TOKEN overrides everything for one shell.
+account index never holds the token. Which account runs is decided in this order:
+`--account <name>`, then DISCORD_AXI_ACCOUNT, then a bare token in
+DISCORD_AXI_TOKEN, then the stored default.
+
+If `discord-axi` is not on PATH, install it with `go install github.com/zekby/discord-axi@latest`.
 
 ## Addressing a channel
 
@@ -50,7 +53,7 @@ commands[17]{name,effect,usage,description}:
   unread,read,discord-axi unread,List channels with unread messages and mentions (user accounts only)
   read,write,discord-axi read 1234567890,Mark a channel read up to its latest message (user accounts only)
   daemon,read,discord-axi daemon start,Hold one long-lived gateway connection and serve read commands from it
-  setup,read,discord-axi setup hooks,"Install the session-start hooks, or write the installable skill file"
+  setup,read,discord-axi setup hooks,"Install the session-start hooks, or regenerate this repository's SKILL.md"
 ```
 
 ## Ban risk: read and write are not the same

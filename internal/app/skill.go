@@ -6,9 +6,6 @@ import (
 	"github.com/zekby/discord-axi/internal/axi"
 )
 
-// SkillMarkdown renders the installable Agent Skill from the same command table
-// the CLI dispatches on, so the skill cannot drift from the tool. Live state is
-// deliberately absent: a skill is static, the session hook shows what is current.
 // isAccountCommand marks the commands that manage this CLI rather than reach for
 // Discord content, so the ban-risk section talks about reads and writes only.
 func isAccountCommand(name string) bool {
@@ -19,6 +16,21 @@ func isAccountCommand(name string) bool {
 	return false
 }
 
+// Repository is where the skill and the source live. It is the one place the
+// owner/name pair is written down, so no suggestion prints a placeholder.
+const Repository = "zekby/discord-axi"
+
+// SkillInstallCommand installs the on-demand skill in any agent that supports
+// the format, with no Go toolchain and no binary on PATH.
+const SkillInstallCommand = "npx skills add " + Repository
+
+// InstallCommand builds the binary itself, for agents that found the skill but
+// not the executable it documents.
+const InstallCommand = "go install github.com/" + Repository + "@latest"
+
+// SkillMarkdown renders the installable Agent Skill from the same command table
+// the CLI dispatches on, so the skill cannot drift from the tool. Live state is
+// deliberately absent: a skill is static, the session hook shows what is current.
 func SkillMarkdown() string {
 	var b strings.Builder
 	b.WriteString(`---
@@ -44,8 +56,11 @@ is refused before it leaves the machine. **User tokens default to ` + "`read`" +
 one with ` + "`discord-axi auth scope <name> --write`" + ` only when the user asks.
 
 Secrets live in the system keyring (` + "`--store file`" + ` writes a 0600 file instead); the
-account index never holds the token. ` + "`--account <name>`" + ` works on every command and
-` + TokenEnvVar + ` overrides everything for one shell.
+account index never holds the token. Which account runs is decided in this order:
+` + "`--account <name>`" + `, then ` + AccountEnvVar + `, then a bare token in
+` + TokenEnvVar + `, then the stored default.
+
+If ` + "`discord-axi`" + ` is not on PATH, install it with ` + "`" + InstallCommand + "`" + `.
 
 ## Addressing a channel
 

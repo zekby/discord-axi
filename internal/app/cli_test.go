@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -336,5 +337,89 @@ func TestRequestedFieldsAreAppendedToTheSchema(t *testing.T) {
 	}
 	if !strings.Contains(out, "messages[2]{id,author,time,content,url}:") {
 		t.Fatalf("--fields should extend the row schema:\n%s", out)
+	}
+}
+
+// A usage error must not be hidden behind a missing account: the agent would
+// fix the wrong thing.
+func TestArgvIsValidatedBeforeTheAccountIsResolved(t *testing.T) {
+	var requests []string
+	mockDiscord(t, discordAPI(t, &requests))
+	t.Setenv(TokenEnvVar, "")
+	t.Setenv("PATH", "") // keeps the keyring helper from answering on this machine
+
+	cases := [][]string{
+		{"guilds", "--limit", "abc"},
+		{"messages", "Acme/general", "--limit", "101"},
+		{"messages", "Acme/general", "--fields", "nope"},
+		{"delete", "Acme/general", "not-a-snowflake"},
+		{"send", "Acme/general", "--content", "hi", "--reply", "not-a-snowflake"},
+		{"search", "Acme", "--content", "x", "--limit", "0"},
+	}
+	for _, argv := range cases {
+		out, code := run(t, argv...)
+		if code != 2 {
+			t.Fatalf("%v exited %d, want a usage error:\n%s", argv, code, out)
+		}
+	}
+	if len(requests) != 0 {
+		t.Fatalf("validation must happen before any request, got %v", requests)
+	}
+}
+
+func TestLimitSuggestionsUseTheCommandsOwnDefault(t *testing.T) {
+	mockDiscord(t, discordAPI(t, nil))
+
+	out, _ := run(t, "guilds", "--limit", "abc")
+	if !strings.Contains(out, "guilds --limit "+defaultListLimit) {
+		t.Fatalf("suggestion should offer the command's default:\n%s", out)
+	}
+	out, _ = run(t, "messages", "Acme/general", "--limit", "abc")
+	if !strings.Contains(out, "messages --limit "+defaultMsgLimit) {
+		t.Fatalf("suggestion should offer the command's default:\n%s", out)
+	}
+}
+
+func TestMissingActionNamesTheActions(t *testing.T) {
+	mockDiscord(t, discordAPI(t, nil))
+
+	for command, actions := range map[string]string{
+		"auth":   "list, use, scope",
+		"setup":  "hooks, skill",
+		"daemon": "start, run, status, stop",
+	} {
+		out, code := run(t, command)
+		if code != 2 || !strings.Contains(out, actions) {
+			t.Fatalf("`%s` with no action exited %d and did not list %q:\n%s", command, code, actions, out)
+		}
+	}
+}
+
+func TestOptionalArgumentsReadAsOptional(t *testing.T) {
+	mockDiscord(t, discordAPI(t, nil))
+
+	out, code := run(t, "logout", "--help")
+	if code != 0 || !strings.Contains(out, "discord-axi logout [account]") {
+		t.Fatalf("optional arguments belong in brackets:\n%s", out)
+	}
+}
+
+// `setup skill` regenerates this repository's file; it is not how a user
+// installs the skill, and saying so was the whole confusion.
+func TestSetupSkillPointsAtTheRealInstallCommand(t *testing.T) {
+	mockDiscord(t, discordAPI(t, nil))
+
+	out, code := run(t, "setup", "skill", "--path", filepath.Join(t.TempDir(), "SKILL.md"))
+	if code != 0 {
+		t.Fatalf("exit code = %d:\n%s", code, out)
+	}
+	if strings.Contains(out, "<owner>") || !strings.Contains(out, SkillInstallCommand) {
+		t.Fatalf("help should name this repository, not a placeholder:\n%s", out)
+	}
+}
+
+func TestSkillTellsAnAgentHowToGetTheBinary(t *testing.T) {
+	if !strings.Contains(SkillMarkdown(), InstallCommand) {
+		t.Fatal("a skill can be installed without the binary, so it must say how to get one")
 	}
 }

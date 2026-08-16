@@ -237,7 +237,7 @@ func daemonCommand() *axi.Command {
 	return &axi.Command{
 		Name: "daemon",
 		Desc: "Hold one long-lived gateway connection and serve read commands from it",
-		Args: []axi.Arg{{Name: "action", Required: true}},
+		Args: []axi.Arg{{Name: "action", Required: true, Values: []string{"start", "run", "status", "stop"}}},
 		Flags: []axi.Flag{
 			{
 				Name:    "--idle",

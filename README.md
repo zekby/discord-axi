@@ -48,8 +48,13 @@ upstream does.
 ## Install
 
 ```sh
-go build -o discord-axi .
-mv discord-axi ~/.local/bin/
+go install github.com/zekby/discord-axi@latest
+```
+
+Or from a clone, which is what the `setup skill` step below expects:
+
+```sh
+go build -o ~/.local/bin/discord-axi .
 ```
 
 ## Use
@@ -104,11 +109,12 @@ Install whichever fits; you do not need both.
    [Agent Skill](https://agentskills.io) that costs nothing per session:
 
    ```sh
-   npx skills add <owner>/discord-axi
+   npx skills add zekby/discord-axi
    ```
 
    It is generated from the command table, and `go test ./...` fails if it drifts.
-   Regenerate with `discord-axi setup skill --path SKILL.md`.
+   `discord-axi setup skill` regenerates it — that is a maintainer command for this
+   repository, not the way to install the skill.
 
 ## Looking like a client, not a script
 
