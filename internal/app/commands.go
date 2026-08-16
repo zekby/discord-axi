@@ -28,6 +28,51 @@ func timestamp(when discord.Timestamp) string {
 	return when.Time().UTC().Format("2006-01-02T15:04Z")
 }
 
+// describe renders what a message says. Plenty of messages carry no text at all
+// — a sticker, an image, a forwarded post — and printing an empty cell for them
+// tells an agent nothing, so the payload is described instead.
+func describe(message discord.Message) string {
+	if message.Content != "" {
+		return message.Content
+	}
+
+	switch {
+	case len(message.Stickers) > 0:
+		return "[sticker: " + message.Stickers[0].Name + "]"
+
+	case len(message.Attachments) > 0:
+		names := make([]string, 0, len(message.Attachments))
+		for _, attachment := range message.Attachments {
+			names = append(names, attachment.Filename)
+		}
+		return "[" + strconv.Itoa(len(names)) + " attachment(s): " + strings.Join(names, ", ") + "]"
+
+	case len(message.MessageSnapshots) > 0:
+		forwarded := message.MessageSnapshots[0].Message.Content
+		if forwarded == "" {
+			return "[forwarded message]"
+		}
+		return "[forwarded: " + forwarded + "]"
+
+	case len(message.Embeds) > 0:
+		embed := message.Embeds[0]
+		for _, label := range []string{embed.Title, embed.Description, embed.URL} {
+			if label != "" {
+				return "[embed: " + label + "]"
+			}
+		}
+		return "[embed]"
+
+	default:
+		// Discord adds system message types faster than any client tracks them, so
+		// report the number rather than pretending the message was empty.
+		if message.Type != discord.DefaultMessage && message.Type != discord.InlinedReplyMessage {
+			return "[system message, type " + strconv.Itoa(int(message.Type)) + "]"
+		}
+		return "[no text]"
+	}
+}
+
 func truncate(content string, full bool) (string, bool) {
 	if full || len(content) <= truncateAt {
 		return content, false
@@ -592,7 +637,7 @@ func messagesCommand() *axi.Command {
 				if !message.ChannelID.IsValid() {
 					message.ChannelID = channel.Channel.ID
 				}
-				body, cut := truncate(message.Content, full)
+				body, cut := truncate(describe(message), full)
 				truncated = truncated || cut
 				rows = append(rows, messageFields.apply(
 					axi.NewDoc().
@@ -842,7 +887,7 @@ func searchCommand() *axi.Command {
 			shown := limited(hits, limit)
 			rows := make([]*axi.Doc, 0, len(shown))
 			for _, message := range shown {
-				body, _ := truncate(message.Content, inv.Bool("--full"))
+				body, _ := truncate(describe(message), inv.Bool("--full"))
 				rows = append(rows, axi.NewDoc().
 					Set("id", message.ID.String()).
 					Set("channel", message.ChannelID.String()).
