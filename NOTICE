@@ -1,0 +1,14 @@
+discord-axi
+
+internal/discordo contains files copied from Discordo
+(https://github.com/ayn2op/discordo), Copyright (c) ayn2op, licensed under the
+GNU General Public License v3.0. The transport, TLS profile, gateway dialer and
+identify properties are otherwise unmodified, so this CLI talks to Discord
+exactly like Discordo does. Changes:
+
+  - import paths and the keyring service name
+  - generated.go: ClientBuildNumber became a var, so it can be refreshed from
+    Discord's login page at runtime instead of staying frozen at build time
+
+Because those files are GPL-3.0, discord-axi as a whole is distributed under the
+GNU General Public License v3.0. See LICENSE.
