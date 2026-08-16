@@ -25,6 +25,9 @@ account index never holds the token. Which account runs is decided in this order
 `--account <name>`, then DISCORD_AXI_ACCOUNT, then a bare token in
 DISCORD_AXI_TOKEN, then the stored default.
 
+A token in DISCORD_AXI_TOKEN follows the same rule as a login: it may only read
+unless DISCORD_AXI_SCOPE=write says otherwise.
+
 If `discord-axi` is not on PATH, install it with `go install github.com/zekby/discord-axi@latest`.
 
 ## Addressing a channel

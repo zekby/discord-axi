@@ -39,7 +39,7 @@ func (d readOnlyDriver) NewRequest(ctx context.Context, method, url string) (htt
 	if method != http.MethodGet {
 		return nil, axi.Fail("READ_ONLY",
 			`account "`+d.profile+`" is read-only, so this cannot `+method,
-			"Run `"+axi.Binary()+" auth scope "+d.profile+" --write` to allow writes",
+			widenScopeHint(d.profile),
 			"Reading is what carries no reported risk of the account being disabled")
 	}
 	return d.Client.NewRequest(ctx, method, url)
@@ -77,8 +77,18 @@ func RequireWrite(credentials Credentials) error {
 		return nil
 	}
 	return axi.Fail("READ_ONLY", `account "`+credentials.Profile+`" is read-only`,
-		"Run `"+axi.Binary()+" auth scope "+credentials.Profile+" --write` to allow writes",
+		widenScopeHint(credentials.Profile),
 		"A read-only account cannot be the one that gets disabled for automated writing")
+}
+
+// widenScopeHint names the way to allow writes for the way these credentials
+// arrived: a stored account is changed with `auth scope`, a token in the
+// environment only with the environment.
+func widenScopeHint(profile string) string {
+	if profile == envProfile {
+		return "Set " + ScopeEnvVar + "=" + ScopeWrite + " to allow writes with the token in " + TokenEnvVar
+	}
+	return "Run `" + axi.Binary() + " auth scope " + profile + " --write` to allow writes"
 }
 
 // Translate turns a Discord API failure into an actionable AXI error. Raw

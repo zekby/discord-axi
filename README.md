@@ -94,8 +94,11 @@ later cannot forget the check. `--account` works on every command.
 
 Tokens live in the OS keyring — `--store file` writes a `0600` file instead, for
 machines without one — and the account index never holds a secret.
-`DISCORD_AXI_ACCOUNT` picks a stored account for one shell; `DISCORD_AXI_TOKEN`
-overrides everything with a bare token, read-only if `DISCORD_AXI_SCOPE=read`.
+`DISCORD_AXI_ACCOUNT` picks a stored account for one shell. `DISCORD_AXI_TOKEN`
+carries a bare token instead, for CI and containers that have no keyring and
+should leave nothing behind; it obeys the same rule as a login, so a user token
+may only read until `DISCORD_AXI_SCOPE=write` says otherwise. `--account` wins
+over both.
 
 ## Two ways to give an agent this tool
 

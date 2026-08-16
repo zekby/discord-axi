@@ -171,3 +171,61 @@ func TestDaemonReadsTheAccountOutOfRawArgv(t *testing.T) {
 		}
 	}
 }
+
+// A token in the environment is the one path that could otherwise slip past the
+// scope a stored account carries, so it follows the same rule `login` follows.
+func TestEnvironmentTokensFollowTheSameScopeRuleAsLogin(t *testing.T) {
+	mockDiscord(t, discordAPI(t, nil))
+
+	for _, want := range []struct {
+		token, scope, kind string
+	}{
+		{"user-token", ScopeRead, KindUser},
+		{BotPrefix + "bot-token", ScopeWrite, KindBot},
+	} {
+		t.Setenv(TokenEnvVar, want.token)
+		t.Setenv(ScopeEnvVar, "")
+		credentials, err := Resolve(nil)
+		if err != nil {
+			t.Fatalf("%s: %v", want.kind, err)
+		}
+		if credentials.Kind != want.kind || credentials.Scope != want.scope {
+			t.Fatalf("%s token resolved to %s/%s, want %s/%s",
+				want.kind, credentials.Kind, credentials.Scope, want.kind, want.scope)
+		}
+	}
+}
+
+func TestEnvironmentScopeCanWidenAndIsValidated(t *testing.T) {
+	mockDiscord(t, discordAPI(t, nil))
+	t.Setenv(TokenEnvVar, "user-token")
+
+	t.Setenv(ScopeEnvVar, ScopeWrite)
+	credentials, err := Resolve(nil)
+	if err != nil || credentials.Scope != ScopeWrite {
+		t.Fatalf("scope = %q, err = %v, want an explicit widening to work", credentials.Scope, err)
+	}
+
+	t.Setenv(ScopeEnvVar, "readonly")
+	out, code := run(t, "guilds")
+	if code != 2 {
+		t.Fatalf("an unreadable scope must be a usage error, got %d:\n%s", code, out)
+	}
+	if !strings.Contains(out, ScopeEnvVar) {
+		t.Fatalf("the error must name the variable:\n%s", out)
+	}
+}
+
+// `auth scope env --write` would fail: the environment is not a stored account.
+func TestReadOnlyEnvironmentTokenIsToldHowToWidenItself(t *testing.T) {
+	mockDiscord(t, discordAPI(t, nil))
+	t.Setenv(TokenEnvVar, "user-token")
+
+	out, code := run(t, "send", "Acme/general", "--content", "hi")
+	if code != 1 || !strings.Contains(out, ScopeEnvVar+"="+ScopeWrite) {
+		t.Fatalf("exit %d; the hint must fit how the token arrived:\n%s", code, out)
+	}
+	if strings.Contains(out, "auth scope "+envProfile) {
+		t.Fatalf("suggested a command that cannot work:\n%s", out)
+	}
+}

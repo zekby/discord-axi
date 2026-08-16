@@ -190,14 +190,14 @@ func Resolve(inv *axi.Invocation) (Credentials, error) {
 	}
 
 	if token := os.Getenv(TokenEnvVar); token != "" {
-		scope := ScopeWrite
-		if os.Getenv(ScopeEnvVar) == ScopeRead {
-			scope = ScopeRead
-		}
 		kind := KindUser
 		if strings.HasPrefix(token, BotPrefix) {
 			kind = KindBot
 			token = strings.TrimPrefix(token, BotPrefix)
+		}
+		scope, err := envScope(kind)
+		if err != nil {
+			return Credentials{}, err
 		}
 		return Credentials{
 			Profile: envProfile,
@@ -232,6 +232,25 @@ func Resolve(inv *axi.Invocation) (Credentials, error) {
 			"Run `" + axi.Binary() + " auth use <name>` to pick a default"}, help...)
 	}
 	return Credentials{}, axi.Fail("NOT_AUTHENTICATED", "not logged in", help...)
+}
+
+// envScope applies the rule `login` applies: a user token may only read unless
+// the caller widens it in as many words. A token in the environment is the one
+// path that could otherwise slip past the scope a stored account would carry.
+func envScope(kind string) (string, error) {
+	switch requested := os.Getenv(ScopeEnvVar); requested {
+	case ScopeRead, ScopeWrite:
+		return requested, nil
+	case "":
+		if kind == KindUser {
+			return ScopeRead, nil
+		}
+		return ScopeWrite, nil
+	default:
+		return "", axi.Usage(ScopeEnvVar+` must be "`+ScopeRead+`" or "`+ScopeWrite+`", got "`+requested+`"`,
+			"Set "+ScopeEnvVar+"="+ScopeWrite+" to allow writes with the token in "+TokenEnvVar,
+			"Unset "+ScopeEnvVar+" to let the token kind decide")
+	}
 }
 
 func knownAccounts(index ProfileIndex) string {

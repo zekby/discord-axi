@@ -60,6 +60,9 @@ account index never holds the token. Which account runs is decided in this order
 ` + "`--account <name>`" + `, then ` + AccountEnvVar + `, then a bare token in
 ` + TokenEnvVar + `, then the stored default.
 
+A token in ` + TokenEnvVar + ` follows the same rule as a login: it may only read
+unless ` + ScopeEnvVar + `=` + ScopeWrite + ` says otherwise.
+
 If ` + "`discord-axi`" + ` is not on PATH, install it with ` + "`" + InstallCommand + "`" + `.
 
 ## Addressing a channel

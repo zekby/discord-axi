@@ -129,7 +129,7 @@ func TestHomeShowsAccountAndGuilds(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit code = %d:\n%s", code, out)
 	}
-	for _, want := range []string{"bin: ", `account: "AXI Agent (env, user, write)"`, "guilds[2]{id,name}:", `"100000000000000001",Acme`} {
+	for _, want := range []string{"bin: ", `account: "AXI Agent (env, user, read)"`, "guilds[2]{id,name}:", `"100000000000000001",Acme`} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("home view is missing %q:\n%s", want, out)
 		}
@@ -209,6 +209,7 @@ func TestMessagesRejectsOversizedLimitBeforeCallingDiscord(t *testing.T) {
 
 func TestSendReportsIDAndJumpURL(t *testing.T) {
 	mockDiscord(t, discordAPI(t, nil))
+	t.Setenv(ScopeEnvVar, ScopeWrite)
 
 	out, code := run(t, "send", "Acme/general", "--content", "deploy finished")
 	if code != 0 {
@@ -235,6 +236,7 @@ func TestSendRequiresContentBeforeCallingDiscord(t *testing.T) {
 
 func TestDeletingAMissingMessageIsANoOp(t *testing.T) {
 	mockDiscord(t, discordAPI(t, nil))
+	t.Setenv(ScopeEnvVar, ScopeWrite)
 
 	out, code := run(t, "delete", "Acme/general", "404404")
 	if code != 0 {
