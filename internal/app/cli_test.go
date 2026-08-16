@@ -423,3 +423,25 @@ func TestSkillTellsAnAgentHowToGetTheBinary(t *testing.T) {
 		t.Fatal("a skill can be installed without the binary, so it must say how to get one")
 	}
 }
+
+// Password login was removed because it is what got accounts disabled
+// upstream. Any surviving mention of it would send an agent down a dead end.
+func TestNothingStillAdvertisesPasswordLogin(t *testing.T) {
+	mockDiscord(t, discordAPI(t, nil))
+	t.Setenv(TokenEnvVar, "")
+	t.Setenv("PATH", "") // keeps the keyring helper from answering on this machine
+
+	home, _ := run(t)
+	surfaces := map[string]string{"logged-out home": home, "skill": SkillMarkdown()}
+	for _, command := range Commands() {
+		out, _ := run(t, command.Name, "--help")
+		surfaces[command.Name+" --help"] = out
+	}
+	for where, text := range surfaces {
+		for _, gone := range []string{"--password", "--email"} {
+			if strings.Contains(text, gone) {
+				t.Fatalf("%s still offers %s:\n%s", where, gone, text)
+			}
+		}
+	}
+}

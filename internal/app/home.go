@@ -18,11 +18,7 @@ func Home() (*axi.Doc, error) {
 	if err != nil {
 		return axi.NewDoc().
 			Set("account", "not logged in").
-			Set("help", []string{
-				"Run `" + axi.Binary() + ` login --token "<token>"` + "` to authenticate",
-				"Run `" + axi.Binary() + ` login --email "<email>" --password "<password>"` + "` to log in with a password",
-				"Or set " + TokenEnvVar + " in the environment",
-			}), nil
+			Set("help", errorHelp(err)), nil
 	}
 
 	me, err := client.Me()
