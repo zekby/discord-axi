@@ -37,7 +37,24 @@ func Fail(code, message string, help ...string) *Error {
 	return &Error{Message: message, Code: code, Help: help}
 }
 
+// Relayed is a failure whose document was already rendered by another process
+// running this same CLI. Re-wrapping it would nest one structured error inside
+// the message of another, so it is passed through with its code and exit status.
+type Relayed struct {
+	Doc  *Doc
+	Code int
+}
+
+func (r *Relayed) Error() string { return "relayed failure" }
+
+// Relay wraps an already-rendered failure document for pass-through.
+func Relay(doc *Doc, code int) *Relayed { return &Relayed{Doc: doc, Code: code} }
+
 func ExitCode(err error) int {
+	var relayed *Relayed
+	if errors.As(err, &relayed) {
+		return relayed.Code
+	}
 	var axiErr *Error
 	if errors.As(err, &axiErr) && axiErr.Code == CodeValidation {
 		return ExitUsage
@@ -47,6 +64,10 @@ func ExitCode(err error) int {
 
 func ErrorDoc(err error) *Doc {
 	doc := NewDoc()
+	var relayed *Relayed
+	if errors.As(err, &relayed) {
+		return relayed.Doc
+	}
 	var axiErr *Error
 	if errors.As(err, &axiErr) {
 		doc.Set("error", axiErr.Message).Set("code", axiErr.Code)

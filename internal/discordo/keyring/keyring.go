@@ -1,23 +1,23 @@
 package keyring
 
 import (
-	"github.com/zekby/discord-axi/internal/discordo/consts"
 	"github.com/zalando/go-keyring"
+	"github.com/zekby/discord-axi/internal/discordo/consts"
 )
 
-const (
-	keyringService = consts.Name
-	keyringUser    = "token"
-)
+const keyringService = consts.Name
 
-func GetToken() (string, error) {
-	return keyring.Get(keyringService, keyringUser)
+// Changed from Discordo's single "token" entry: each account profile keeps its
+// own secret under its own name, so several accounts can be stored at once.
+
+func GetToken(profile string) (string, error) {
+	return keyring.Get(keyringService, profile)
 }
 
-func SetToken(s string) error {
-	return keyring.Set(keyringService, keyringUser, s)
+func SetToken(profile, token string) error {
+	return keyring.Set(keyringService, profile, token)
 }
 
-func DeleteToken() error {
-	return keyring.Delete(keyringService, keyringUser)
+func DeleteToken(profile string) error {
+	return keyring.Delete(keyringService, profile)
 }

@@ -49,9 +49,20 @@ type Invocation struct {
 	Command *Command
 	// Raw is argv as given, for handlers that relay the command elsewhere.
 	Raw        []string
+	globals    []Flag
 	Positional []string
 	strings    map[string]string
 	booleans   map[string]bool
+}
+
+// SyntheticInvocation carries flag values that did not come from argv, for
+// callers that must resolve a global flag before a command spec exists.
+func SyntheticInvocation(values map[string]string) *Invocation {
+	inv := &Invocation{strings: map[string]string{}, booleans: map[string]bool{}}
+	for name, value := range values {
+		inv.strings[name] = value
+	}
+	return inv
 }
 
 func (i *Invocation) Arg(index int) string {
@@ -87,15 +98,17 @@ func (i *Invocation) Uint(flag string) (uint, error) {
 }
 
 // Parse validates argv against the command spec before any dependency call. An
-// unrecognized flag is rejected by name rather than silently dropped.
-func (c *Command) Parse(args []string) (*Invocation, error) {
+// unrecognized flag is rejected by name rather than silently dropped. Globals
+// are flags the whole CLI accepts, so they are valid on every command.
+func (c *Command) Parse(args []string, globals ...Flag) (*Invocation, error) {
 	inv := &Invocation{
 		Command:  c,
 		Raw:      args,
+		globals:  globals,
 		strings:  map[string]string{},
 		booleans: map[string]bool{},
 	}
-	for _, flag := range c.Flags {
+	for _, flag := range append(append([]Flag{}, c.Flags...), globals...) {
 		if flag.Default != "" {
 			inv.strings[flag.Name] = flag.Default
 		}
@@ -109,9 +122,9 @@ func (c *Command) Parse(args []string) (*Invocation, error) {
 		}
 
 		name, inline, hasInline := strings.Cut(arg, "=")
-		flag, known := c.flag(name)
+		flag, known := c.flag(name, globals)
 		if !known {
-			return nil, c.unknownFlag(name)
+			return nil, c.unknownFlag(name, globals)
 		}
 		if flag.boolean() {
 			if hasInline {
@@ -154,8 +167,13 @@ func (c *Command) Parse(args []string) (*Invocation, error) {
 	return inv, nil
 }
 
-func (c *Command) flag(name string) (Flag, bool) {
+func (c *Command) flag(name string, globals []Flag) (Flag, bool) {
 	for _, flag := range c.Flags {
+		if flag.Name == name {
+			return flag, true
+		}
+	}
+	for _, flag := range globals {
 		if flag.Name == name {
 			return flag, true
 		}
@@ -165,9 +183,9 @@ func (c *Command) flag(name string) (Flag, bool) {
 
 // unknownFlag folds the command's flag reference into the error so the agent
 // corrects itself without a second `--help` call.
-func (c *Command) unknownFlag(name string) error {
+func (c *Command) unknownFlag(name string, globals []Flag) error {
 	if replacement, ok := renamedFlags[name]; ok {
-		if _, valid := c.flag(replacement); valid {
+		if _, valid := c.flag(replacement, globals); valid {
 			return Usage("unknown flag "+name+" for `"+c.Name+"`",
 				name+" is not a flag of this CLI; use "+replacement+" instead")
 		}
@@ -175,6 +193,9 @@ func (c *Command) unknownFlag(name string) error {
 	help := []string{"valid flags for `" + c.Name + "`: " + c.flagNames() + " (--help always allowed)"}
 	for _, flag := range c.Flags {
 		help = append(help, flag.Name+flagPlaceholder(flag)+" — "+flag.Desc)
+	}
+	for _, flag := range globals {
+		help = append(help, flag.Name+flagPlaceholder(flag)+" — "+flag.Desc+" [any command]")
 	}
 	return Usage("unknown flag "+name+" for `"+c.Name+"`", help...)
 }
@@ -224,7 +245,7 @@ func (c *Command) Usage() string {
 }
 
 // Help is the per-command reference: flags with defaults, arguments, examples.
-func (c *Command) Help() *Doc {
+func (c *Command) Help(globals ...Flag) *Doc {
 	doc := NewDoc().
 		Set("command", c.Name).
 		Set("description", c.Desc).
@@ -256,6 +277,13 @@ func (c *Command) Help() *Doc {
 			flags.Set(flag.Name+flagPlaceholder(flag), desc)
 		}
 		doc.Set("flags", flags)
+	}
+	if len(globals) > 0 {
+		names := make([]string, len(globals))
+		for i, flag := range globals {
+			names[i] = flag.Name + flagPlaceholder(flag)
+		}
+		doc.Set("globals", strings.Join(names, ", ")+" (accepted by every command)")
 	}
 	return doc.Set("examples", c.Examples)
 }

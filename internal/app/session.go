@@ -24,18 +24,18 @@ const gatewayTimeout = 20 * time.Second
 
 // openState connects to the gateway exactly like Discordo does and blocks until
 // Discord has sent the ready payload that carries read state.
-func openState(token string) (*ningen.State, func(), error) {
-	if IsBot(token) {
+func openState(credentials Credentials) (*ningen.State, func(), error) {
+	if credentials.IsBot() {
 		return nil, nil, axi.Fail("FORBIDDEN", "Discord keeps read state for user accounts only",
 			"Run `"+axi.Binary()+` messages "<guild>/<channel>"`+"` to read a channel with this bot token")
 	}
 
 	identifier := gateway.NewIdentifier(gateway.IdentifyCommand{
-		Token:      token,
+		Token:      credentials.Authorization(),
 		Properties: dhttp.IdentifyProperties(),
 	})
 	discordSession := session.NewWithGateway(clientgateway.New(identifier), handler.New())
-	discordSession.Client = NewClient(token)
+	discordSession.Client = NewClient(credentials)
 
 	connected := ningen.FromState(state.NewFromSession(discordSession, defaultstore.New()))
 	connected.OnRequest = append(connected.OnRequest, httputil.WithHeaders(dhttp.Headers()))
@@ -57,11 +57,11 @@ func openState(token string) (*ningen.State, func(), error) {
 
 // stateFor prefers the daemon's already-open session. Only a bare CLI run pays
 // for a connection of its own, and it says so in the output.
-func stateFor(token string) (*ningen.State, func(), bool, error) {
+func stateFor(credentials Credentials) (*ningen.State, func(), bool, error) {
 	if liveState != nil {
 		return liveState, func() {}, true, nil
 	}
-	connected, closeState, err := openState(token)
+	connected, closeState, err := openState(credentials)
 	return connected, closeState, false, err
 }
 
@@ -154,7 +154,7 @@ func unreadCommand() *axi.Command {
 			if doc, served, err := forwardToDaemon("unread", inv.Raw); served {
 				return doc, err
 			}
-			token, err := Token()
+			credentials, err := Resolve(inv)
 			if err != nil {
 				return nil, err
 			}
@@ -162,7 +162,7 @@ func unreadCommand() *axi.Command {
 			if err != nil {
 				return nil, err
 			}
-			connected, closeState, persistent, err := stateFor(token)
+			connected, closeState, persistent, err := stateFor(credentials)
 			if err != nil {
 				return nil, err
 			}
@@ -220,20 +220,25 @@ func markReadCommand() *axi.Command {
 		Args:     []axi.Arg{{Name: "channel", Required: true}},
 		Examples: []string{"discord-axi read 1234567890", `discord-axi read "My Server/general"`},
 		Run: func(inv *axi.Invocation) (*axi.Doc, error) {
-			if doc, served, err := forwardToDaemon("read", inv.Raw); served {
-				return doc, err
-			}
-			token, err := Token()
+			// The scope is checked before the daemon is involved, so a read-only
+			// account never opens a gateway connection to be told no.
+			credentials, err := Resolve(inv)
 			if err != nil {
 				return nil, err
 			}
-			connected, closeState, _, err := stateFor(token)
+			if err := RequireWrite(credentials); err != nil {
+				return nil, err
+			}
+			if doc, served, err := forwardToDaemon("read", inv.Raw); served {
+				return doc, err
+			}
+			connected, closeState, _, err := stateFor(credentials)
 			if err != nil {
 				return nil, err
 			}
 			defer closeState()
 
-			channel, err := ResolveChannel(NewClient(token), inv.Arg(0))
+			channel, err := ResolveChannel(NewClient(credentials), inv.Arg(0))
 			if err != nil {
 				return nil, err
 			}

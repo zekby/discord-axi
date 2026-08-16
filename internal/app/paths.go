@@ -1,6 +1,8 @@
 package app
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 )
@@ -36,5 +38,13 @@ func SocketPath() string {
 	if path := filepath.Join(StateDir(), "daemon.sock"); len(path) <= maxSocketPath {
 		return path
 	}
-	return filepath.Join(os.TempDir(), "discord-axi.sock")
+	// Last resort, for state directories too deep to hold a socket. The name
+	// carries the state directory, because a fixed one would let two unrelated
+	// setups share a single authenticated session without either asking.
+	return filepath.Join(os.TempDir(), "discord-axi-"+fingerprint(StateDir())+".sock")
+}
+
+func fingerprint(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:6])
 }

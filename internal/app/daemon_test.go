@@ -69,14 +69,37 @@ func TestForwardToDaemonRelaysCommandAndOutput(t *testing.T) {
 }
 
 func TestForwardToDaemonSurfacesDaemonErrors(t *testing.T) {
-	fakeDaemon(t, daemonResponse{Output: "error: token rejected\n", Code: axi.ExitError})
+	fakeDaemon(t, daemonResponse{Output: "error: token rejected\ncode: NOT_AUTHENTICATED\n", Code: axi.ExitError})
 
 	_, served, err := forwardToDaemon("unread", nil)
 	if !served || err == nil {
 		t.Fatalf("served = %v, err = %v, want a relayed failure", served, err)
 	}
-	if !strings.Contains(err.Error(), "token rejected") {
-		t.Fatalf("err = %v, want the daemon's message", err)
+	if got := axi.ErrorDoc(err).Encode(); got != "error: token rejected\ncode: NOT_AUTHENTICATED" {
+		t.Fatalf("output = %q, want the daemon's own document", got)
+	}
+	if code := axi.ExitCode(err); code != axi.ExitError {
+		t.Fatalf("exit code = %d, want the daemon's own", code)
+	}
+}
+
+// A daemon failure is already a structured document. Wrapping it again would
+// nest one error inside the message of another, which an agent cannot read.
+func TestRelayedUsageErrorKeepsItsCodeAndExitStatus(t *testing.T) {
+	var rendered strings.Builder
+	code := App("daemon").Run([]string{"guilds", "--nope"}, &rendered)
+	fakeDaemon(t, daemonResponse{Output: rendered.String(), Code: code})
+
+	_, served, err := forwardToDaemon("unread", nil)
+	if !served || err == nil {
+		t.Fatalf("served = %v, err = %v, want a relayed failure", served, err)
+	}
+	relayed := axi.ErrorDoc(err).Encode()
+	if strings.Count(relayed, "code:") != 1 || !strings.Contains(relayed, axi.CodeValidation) {
+		t.Fatalf("the daemon error was re-wrapped instead of relayed:\n%s", relayed)
+	}
+	if got := axi.ExitCode(err); got != axi.ExitUsage {
+		t.Fatalf("exit code = %d, want %d", got, axi.ExitUsage)
 	}
 }
 
@@ -258,5 +281,26 @@ func TestDaemonStopsOnRequest(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("`daemon stop` must end the accept loop")
+	}
+}
+
+// Two setups whose paths are too long for a socket must not fall back onto one
+// shared name: that would hand one account's live session to the other.
+func TestSocketFallbackIsNotSharedBetweenStateDirectories(t *testing.T) {
+	deep := strings.Repeat("/nested", 20)
+
+	t.Setenv("XDG_RUNTIME_DIR", deep)
+	t.Setenv("XDG_STATE_HOME", os.TempDir()+"/a"+deep)
+	first := SocketPath()
+	t.Setenv("XDG_STATE_HOME", os.TempDir()+"/b"+deep)
+	second := SocketPath()
+
+	if first == second {
+		t.Fatalf("both state directories fell back to %s", first)
+	}
+	for _, path := range []string{first, second} {
+		if len(path) > maxSocketPath {
+			t.Fatalf("fallback socket %s is %d bytes, over the %d limit", path, len(path), maxSocketPath)
+		}
 	}
 }

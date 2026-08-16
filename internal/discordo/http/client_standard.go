@@ -11,9 +11,19 @@ import (
 )
 
 func NewClient(token string) *api.Client {
-	stdClient := http.Client{Transport: NewTransport()}
-	httpClient := httputil.NewClientWithDriver(httpdriver.WrapClient(stdClient))
-	client := api.NewCustomClient(token, httpClient)
+	return NewClientWithDriver(token, Driver())
+}
+
+// Driver exposes the HTTP driver so a caller can wrap it, for example to refuse
+// writes on a read-only account. Added for discord-axi.
+func Driver() httpdriver.Client {
+	return httpdriver.WrapClient(http.Client{Transport: NewTransport()})
+}
+
+// NewClientWithDriver builds the API client on a caller-supplied driver.
+// Added for discord-axi.
+func NewClientWithDriver(token string, driver httpdriver.Client) *api.Client {
+	client := api.NewCustomClient(token, httputil.NewClientWithDriver(driver))
 	client.UserAgent = BrowserUserAgent()
 	return client
 }

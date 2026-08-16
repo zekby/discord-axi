@@ -51,19 +51,45 @@ func idleTimeout(inv *axi.Invocation) (time.Duration, error) {
 
 func daemonLogPath() string { return filepath.Join(StateDir(), "daemon.log") }
 
+// credentialsFor resolves the account a relayed command asked for, so the
+// daemon is started for that account rather than the default one.
+func credentialsFor(args []string) Credentials {
+	credentials, _ := Resolve(accountFromArgs(args))
+	return credentials
+}
+
+// accountFromArgs pulls --account out of raw argv without a command spec, which
+// is all the daemon layer needs to know.
+func accountFromArgs(args []string) *axi.Invocation {
+	for index, arg := range args {
+		name, inline, hasInline := strings.Cut(arg, "=")
+		if name != AccountFlag {
+			continue
+		}
+		value := inline
+		if !hasInline {
+			if index+1 >= len(args) {
+				break
+			}
+			value = args[index+1]
+		}
+		return axi.SyntheticInvocation(map[string]string{AccountFlag: value})
+	}
+	return nil
+}
+
 // startDaemon launches a detached daemon and waits until it is answering, so the
 // caller can use it immediately. It is a no-op when one is already listening.
-func startDaemon(idle time.Duration) error {
+func startDaemon(idle time.Duration, credentials Credentials) error {
 	if connection, err := net.DialTimeout("unix", SocketPath(), daemonDialTimeout); err == nil {
 		connection.Close()
 		return nil
 	}
 	// Fail here rather than spawning a child that can only die at the login step.
-	token, err := Token()
-	if err != nil {
-		return err
+	if credentials.Token == "" {
+		return axi.Fail("NOT_AUTHENTICATED", "no account to hold a session for")
 	}
-	if IsBot(token) {
+	if credentials.IsBot() {
 		return axi.Fail("FORBIDDEN", "a bot token has no gateway read state to hold open")
 	}
 	executable, err := os.Executable()
@@ -76,7 +102,13 @@ func startDaemon(idle time.Duration) error {
 	}
 	defer logFile.Close()
 
-	command := exec.Command(executable, "daemon", "run", "--idle", strconv.Itoa(int(idle/time.Minute)))
+	arguments := []string{"daemon", "run", "--idle", strconv.Itoa(int(idle / time.Minute))}
+	// The child re-reads the secret from the store instead of inheriting it, so
+	// the token never travels through a second process environment.
+	if credentials.Profile != "" && credentials.Profile != envProfile {
+		arguments = append(arguments, AccountFlag, credentials.Profile)
+	}
+	command := exec.Command(executable, arguments...)
 	command.Stdout = logFile
 	command.Stderr = logFile
 	command.SysProcAttr = detachAttrs()
@@ -107,14 +139,18 @@ func startDaemon(idle time.Duration) error {
 	return os.ErrDeadlineExceeded
 }
 
-func startDaemonCommand(idle time.Duration) (*axi.Doc, error) {
+func startDaemonCommand(inv *axi.Invocation, idle time.Duration) (*axi.Doc, error) {
 	if connection, err := net.DialTimeout("unix", SocketPath(), daemonDialTimeout); err == nil {
 		connection.Close()
 		return axi.NewDoc().
 			Set("daemon", "already running (no-op)").
 			Set("socket", axi.CollapseHome(SocketPath())), nil
 	}
-	if err := startDaemon(idle); err != nil {
+	credentials, err := Resolve(inv)
+	if err != nil {
+		return nil, err
+	}
+	if err := startDaemon(idle, credentials); err != nil {
 		return nil, axi.Fail("DAEMON_FAILED", "the daemon did not come up",
 			"Read "+axi.CollapseHome(daemonLogPath())+" for what it reported",
 			"Run `"+axi.Binary()+" daemon run` to watch it start in the foreground")
@@ -170,7 +206,7 @@ func forwardToDaemon(command string, args []string) (*axi.Doc, bool, error) {
 		if !autoStartEnabled() {
 			return nil, false, nil
 		}
-		if err := startDaemon(defaultIdleTimeout); err != nil {
+		if err := startDaemon(defaultIdleTimeout, credentialsFor(args)); err != nil {
 			// A failed auto-start is not fatal: the command can still connect on
 			// its own, which is exactly what happened before daemons existed.
 			return nil, false, nil
@@ -190,7 +226,9 @@ func forwardToDaemon(command string, args []string) (*axi.Doc, bool, error) {
 		return nil, false, nil
 	}
 	if response.Code != axi.ExitOK {
-		return nil, true, axi.Fail("DAEMON_ERROR", strings.TrimSpace(response.Output))
+		// The daemon runs this same CLI, so its output is already a structured
+		// failure document; wrapping it again would nest one inside the other.
+		return nil, true, axi.Relay(axi.Raw(response.Output), response.Code)
 	}
 	return axi.Raw(response.Output), true, nil
 }
@@ -220,9 +258,9 @@ func daemonCommand() *axi.Command {
 			}
 			switch inv.Arg(0) {
 			case "start":
-				return startDaemonCommand(idle)
+				return startDaemonCommand(inv, idle)
 			case "run":
-				return runDaemon(idle)
+				return runDaemon(inv, idle)
 			case "status":
 				return daemonStatus()
 			case "stop":
@@ -277,8 +315,8 @@ func stopDaemon() (*axi.Doc, error) {
 	return axi.NewDoc().Set("daemon", "stopped"), nil
 }
 
-func runDaemon(idle time.Duration) (*axi.Doc, error) {
-	token, err := Token()
+func runDaemon(inv *axi.Invocation, idle time.Duration) (*axi.Doc, error) {
+	credentials, err := Resolve(inv)
 	if err != nil {
 		return nil, err
 	}
@@ -290,7 +328,7 @@ func runDaemon(idle time.Duration) (*axi.Doc, error) {
 	}
 	_ = os.Remove(SocketPath())
 
-	connected, closeState, err := openState(token)
+	connected, closeState, err := openState(credentials)
 	if err != nil {
 		return nil, err
 	}

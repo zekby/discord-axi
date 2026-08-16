@@ -13,15 +13,16 @@ blocks on a prompt.
 > Automating a user account ("self-bot") is against Discord's Terms of Service.
 > Use a bot token unless you accept that risk. Search, unread state and marking
 > channels read only exist for user accounts, because Discord does not offer
-> them to bots.
+> them to bots. A user account is stored read-only unless you widen it yourself.
 >
 > Reads and writes are not equally exposed. `whoami`, `guilds`, `channels`,
 > `dms`, `messages`, `search` and `unread` only read; `send`, `edit`, `delete`,
 > `react` and `read` act as the account, are marked `effect: write` in `SKILL.md`
 > and repeat the warning under `caution` in their own `--help`. In upstream's
-> issue tracker the disablings happened on password login
+> issue tracker the disablings happened on email-and-password login
 > ([#691](https://github.com/ayn2op/discordo/issues/691),
-> [#816](https://github.com/ayn2op/discordo/issues/816)) and on the first message
+> [#816](https://github.com/ayn2op/discordo/issues/816)) — which is why this CLI
+> takes a token only — and on the first message
 > sent ([#813](https://github.com/ayn2op/discordo/issues/813)) — never while only
 > reading. With a bot token none of this applies.
 
@@ -35,7 +36,7 @@ import paths:
 | `http`     | API client with the browser user agent, super properties and identify payload |
 | `tls`      | Chrome TLS profile, so Discord sees an ordinary browser handshake             |
 | `gateway`  | Websocket dialer over the same TLS client                                     |
-| `keyring`  | Token storage in the OS keyring                                               |
+| `keyring`  | Token storage in the OS keyring, one entry per account                        |
 
 On top of that it uses the same libraries: `arikawa` for the REST API and the
 gateway, `ningen` for read state — so `unread` reproduces Discordo's unread and
@@ -54,8 +55,8 @@ mv discord-axi ~/.local/bin/
 ## Use
 
 ```sh
-discord-axi login --token "<token>"     # or --email/--password [--code]
-discord-axi                              # account and guilds
+discord-axi login --token "<token>" --as work   # store an account
+discord-axi                                     # account and guilds
 discord-axi channels "My Server"
 discord-axi messages "My Server/general" --limit 50
 discord-axi send "My Server/general" --content "deploy finished"
@@ -67,6 +68,29 @@ message name. An ambiguous name is an error listing the candidates — never a
 guess.
 
 Every subcommand answers `--help` with its own flags, defaults and examples.
+
+## Accounts and scopes
+
+Several accounts can be stored side by side. Each carries a kind — `bot` or
+`user`, detected at login — and a scope that decides what it may do:
+
+```sh
+discord-axi login --token "<bot-token>" --as ci --scope write
+discord-axi login --token "<user-token>" --as personal   # read-only by default
+discord-axi auth list
+discord-axi auth use personal            # change the default account
+discord-axi auth scope personal --write  # allow writes, deliberately
+discord-axi messages "My Server/general" --account ci
+```
+
+A `read` account cannot send, edit, delete, react or mark read: the request is
+refused inside the HTTP client, before it leaves the machine, so a command added
+later cannot forget the check. `--account` works on every command.
+
+Tokens live in the OS keyring — `--store file` writes a `0600` file instead, for
+machines without one — and the account index never holds a secret.
+`DISCORD_AXI_ACCOUNT` picks a stored account for one shell; `DISCORD_AXI_TOKEN`
+overrides everything with a bare token, read-only if `DISCORD_AXI_SCOPE=read`.
 
 ## Two ways to give an agent this tool
 

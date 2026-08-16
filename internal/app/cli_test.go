@@ -128,7 +128,7 @@ func TestHomeShowsAccountAndGuilds(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit code = %d:\n%s", code, out)
 	}
-	for _, want := range []string{"bin: ", "account: AXI Agent (user)", "guilds[2]{id,name}:", `"100000000000000001",Acme`} {
+	for _, want := range []string{"bin: ", `account: "AXI Agent (env, user, write)"`, "guilds[2]{id,name}:", `"100000000000000001",Acme`} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("home view is missing %q:\n%s", want, out)
 		}

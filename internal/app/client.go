@@ -4,62 +4,81 @@
 package app
 
 import (
+	"context"
 	"errors"
-	"os"
-	"strings"
+	"net/http"
 
 	"github.com/ayn2op/arikawa/v3/api"
 	"github.com/ayn2op/arikawa/v3/utils/httputil"
+	"github.com/ayn2op/arikawa/v3/utils/httputil/httpdriver"
 	"github.com/zekby/discord-axi/internal/axi"
 	dhttp "github.com/zekby/discord-axi/internal/discordo/http"
-	"github.com/zekby/discord-axi/internal/discordo/keyring"
 )
 
-// TokenEnvVar overrides the stored token, mirroring Discordo's DISCORDO_TOKEN.
-const TokenEnvVar = "DISCORD_AXI_TOKEN"
+// AccountFlag selects a stored account. It is a global: every command accepts
+// it, and it is never reported as an unknown flag.
+const AccountFlag = "--account"
 
-// BotPrefix is what Discord expects in front of a bot token; user tokens are
-// sent bare.
-const BotPrefix = "Bot "
+func AccountGlobal() axi.Flag {
+	return axi.Flag{
+		Name:  AccountFlag,
+		Value: "name",
+		Desc:  "Run as this stored account instead of the default",
+	}
+}
 
-func Token() (string, error) {
-	if token := os.Getenv(TokenEnvVar); token != "" {
-		return token, nil
+// readOnlyDriver refuses anything that is not a read. The check sits at the
+// transport rather than in each command, so a command added later cannot
+// forget it and no request can slip past.
+type readOnlyDriver struct {
+	httpdriver.Client
+	profile string
+}
+
+func (d readOnlyDriver) NewRequest(ctx context.Context, method, url string) (httpdriver.Request, error) {
+	if method != http.MethodGet {
+		return nil, axi.Fail("READ_ONLY",
+			`account "`+d.profile+`" is read-only, so this cannot `+method,
+			"Run `"+axi.Binary()+" auth scope "+d.profile+" --write` to allow writes",
+			"Reading is what carries no reported risk of the account being disabled")
 	}
-	token, err := keyring.GetToken()
-	if err != nil || token == "" {
-		return "", axi.Fail("NOT_AUTHENTICATED", "not logged in",
-			"Run `"+axi.Binary()+` login --token "<token>"`+"` to authenticate",
-			"Or set "+TokenEnvVar+" in the environment")
-	}
-	return token, nil
+	return d.Client.NewRequest(ctx, method, url)
 }
 
 // NewClient builds the API client with Discordo's browser-shaped transport and
-// headers, so requests look identical to what Discordo sends, plus the pacer
-// that keeps an agent from firing them in bursts.
-func NewClient(token string) *api.Client {
+// headers, the pacer that keeps an agent from firing requests in bursts, and
+// the account's scope.
+func NewClient(credentials Credentials) *api.Client {
 	RefreshClientBuildNumber()
-	client := dhttp.NewClient(token)
+
+	var driver httpdriver.Client = dhttp.Driver()
+	if credentials.ReadOnly() {
+		driver = readOnlyDriver{Client: driver, profile: credentials.Profile}
+	}
+
+	client := dhttp.NewClientWithDriver(credentials.Authorization(), driver)
 	client.OnRequest = append(client.OnRequest, httputil.WithHeaders(dhttp.Headers()), pacedRequest)
 	return client
 }
 
-func Client() (*api.Client, error) {
-	token, err := Token()
+// Client resolves the account for this invocation and builds its client.
+func Client(inv *axi.Invocation) (*api.Client, Credentials, error) {
+	credentials, err := Resolve(inv)
 	if err != nil {
-		return nil, err
+		return nil, Credentials{}, err
 	}
-	return NewClient(token), nil
+	return NewClient(credentials), credentials, nil
 }
 
-func IsBot(token string) bool { return strings.HasPrefix(token, BotPrefix) }
-
-func TokenKind(token string) string {
-	if IsBot(token) {
-		return "bot"
+// RequireWrite refuses a mutating command up front, so the agent gets the same
+// answer whether or not the command would have reached the network.
+func RequireWrite(credentials Credentials) error {
+	if !credentials.ReadOnly() {
+		return nil
 	}
-	return "user"
+	return axi.Fail("READ_ONLY", `account "`+credentials.Profile+`" is read-only`,
+		"Run `"+axi.Binary()+" auth scope "+credentials.Profile+" --write` to allow writes",
+		"A read-only account cannot be the one that gets disabled for automated writing")
 }
 
 // Translate turns a Discord API failure into an actionable AXI error. Raw
@@ -122,4 +141,9 @@ func statusText(status int) string {
 func NotFound(err error) bool {
 	var httpErr *httputil.HTTPError
 	return errors.As(err, &httpErr) && httpErr.Status == 404
+}
+
+func isUnauthorized(err error) bool {
+	var axiErr *axi.Error
+	return errors.As(Translate(err), &axiErr) && axiErr.Code == "NOT_AUTHENTICATED"
 }

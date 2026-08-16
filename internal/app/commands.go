@@ -1,7 +1,6 @@
 package app
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -11,7 +10,6 @@ import (
 	"github.com/ayn2op/arikawa/v3/discord"
 	"github.com/ayn2op/arikawa/v3/utils/sendpart"
 	"github.com/zekby/discord-axi/internal/axi"
-	"github.com/zekby/discord-axi/internal/discordo/keyring"
 )
 
 const (
@@ -210,6 +208,7 @@ func Commands() []*axi.Command {
 		loginCommand(),
 		logoutCommand(),
 		whoamiCommand(),
+		authCommand(),
 		guildsCommand(),
 		channelsCommand(),
 		dmsCommand(),
@@ -232,155 +231,6 @@ func Commands() []*axi.Command {
 	return commands
 }
 
-func loginCommand() *axi.Command {
-	return &axi.Command{
-		Name: "login",
-		Desc: "Store a Discord token in the system keyring, or exchange email and password for one",
-		Flags: []axi.Flag{
-			{Name: "--token", Value: "token", Desc: "Existing user or bot token"},
-			{Name: "--email", Value: "email", Desc: "Email or E.164 phone number, for password login"},
-			{Name: "--password", Value: "password", Desc: "Account password, for password login"},
-			{Name: "--code", Value: "code", Desc: "Two-factor code, when the account requires one"},
-		},
-		Examples: []string{
-			`discord-axi login --token "<token>"`,
-			`discord-axi login --email "me@example.com" --password "<password>" --code 123456`,
-		},
-		Run: func(inv *axi.Invocation) (*axi.Doc, error) {
-			token := inv.String("--token")
-			email := inv.String("--email")
-			password := inv.String("--password")
-
-			switch {
-			case token != "" && (email != "" || password != ""):
-				return nil, axi.Usage("--token cannot be combined with --email or --password",
-					"Run `"+axi.Binary()+` login --token "<token>"`+"`",
-					"Run `"+axi.Binary()+` login --email "<email>" --password "<password>"`+"`")
-			case token == "" && (email == "" || password == ""):
-				return nil, axi.Usage("--token, or both --email and --password, are required for `login`",
-					"Run `"+axi.Binary()+` login --token "<token>"`+"`",
-					"Run `"+axi.Binary()+` login --email "<email>" --password "<password>"`+"`")
-			}
-
-			if token == "" {
-				resolved, err := passwordLogin(email, password, inv.String("--code"))
-				if err != nil {
-					return nil, err
-				}
-				token = resolved
-			}
-
-			authorized, me, err := verify(token)
-			if err != nil {
-				return nil, err
-			}
-			if err := keyring.SetToken(authorized); err != nil {
-				return nil, axi.Fail("KEYRING_ERROR", "could not store the token in the system keyring",
-					"Set "+TokenEnvVar+" in the environment instead")
-			}
-			return axi.NewDoc().
-				Set("login", "authenticated as "+me.DisplayOrUsername()+" ("+TokenKind(authorized)+")").
-				Set("id", me.ID.String()).
-				Set("stored", "system keyring, service "+axi.Binary()).
-				Set("help", []string{"Run `" + axi.Binary() + "` to see the account and its guilds"}), nil
-		},
-	}
-}
-
-// verify decides how the token must be presented. A bot token is only valid
-// behind the "Bot " prefix, a user token only without it.
-func verify(token string) (string, *discord.User, error) {
-	candidates := []string{token}
-	if !IsBot(token) {
-		candidates = append(candidates, BotPrefix+token)
-	}
-	for _, candidate := range candidates {
-		me, err := NewClient(candidate).Me()
-		if err == nil {
-			return candidate, me, nil
-		}
-		if !isUnauthorized(err) {
-			return "", nil, Translate(err)
-		}
-	}
-	return "", nil, axi.Fail("NOT_AUTHENTICATED", "token rejected by Discord",
-		"Check the token was copied in full and has not been reset")
-}
-
-func passwordLogin(email, password, code string) (string, error) {
-	client := NewClient("")
-	response, err := client.Login(email, password)
-	if err != nil {
-		return "", Translate(err)
-	}
-	if response.Token != "" {
-		return response.Token, nil
-	}
-	if !response.MFA {
-		return "", axi.Fail("LOGIN_FAILED", "Discord did not return a token for those credentials",
-			"Log in once in the Discord client to clear any pending verification, then retry")
-	}
-	if code == "" {
-		return "", axi.Usage("this account requires a two-factor code",
-			"Run `"+axi.Binary()+` login --email "<email>" --password "<password>" --code <code>`+"`")
-	}
-	verified, err := client.TOTP(code, response.Ticket, response.LoginInstanceID)
-	if err != nil {
-		return "", Translate(err)
-	}
-	return verified.Token, nil
-}
-
-func logoutCommand() *axi.Command {
-	return &axi.Command{
-		Name:     "logout",
-		Desc:     "Remove the stored token from the system keyring",
-		Examples: []string{"discord-axi logout"},
-		Run: func(*axi.Invocation) (*axi.Doc, error) {
-			if os.Getenv(TokenEnvVar) != "" {
-				return axi.NewDoc().
-					Set("logout", TokenEnvVar+" is set in the environment and takes precedence (no-op)").
-					Set("help", []string{"Unset " + TokenEnvVar + " in the shell to stop using it"}), nil
-			}
-			if _, err := keyring.GetToken(); err != nil {
-				return axi.NewDoc().Set("logout", "no stored token (no-op)"), nil
-			}
-			if err := keyring.DeleteToken(); err != nil {
-				return nil, axi.Fail("KEYRING_ERROR", "could not remove the token from the system keyring")
-			}
-			return axi.NewDoc().Set("logout", "stored token removed"), nil
-		},
-	}
-}
-
-func whoamiCommand() *axi.Command {
-	return &axi.Command{
-		Name:     "whoami",
-		Desc:     "Show the authenticated account",
-		Examples: []string{"discord-axi whoami"},
-		Run: func(*axi.Invocation) (*axi.Doc, error) {
-			token, err := Token()
-			if err != nil {
-				return nil, err
-			}
-			me, err := NewClient(token).Me()
-			if err != nil {
-				return nil, Translate(err)
-			}
-			source := "system keyring"
-			if os.Getenv(TokenEnvVar) != "" {
-				source = TokenEnvVar + " environment variable"
-			}
-			return axi.NewDoc().
-				Set("account", me.DisplayOrUsername()).
-				Set("id", me.ID.String()).
-				Set("username", me.Username).
-				Set("kind", TokenKind(token)).
-				Set("source", source), nil
-		},
-	}
-}
-
 func guildsCommand() *axi.Command {
 	return &axi.Command{
 		Name: "guilds",
@@ -391,7 +241,7 @@ func guildsCommand() *axi.Command {
 		},
 		Examples: []string{"discord-axi guilds", "discord-axi guilds --fields members"},
 		Run: func(inv *axi.Invocation) (*axi.Doc, error) {
-			client, err := Client()
+			client, _, err := Client(inv)
 			if err != nil {
 				return nil, err
 			}
@@ -445,7 +295,7 @@ func channelsCommand() *axi.Command {
 		},
 		Examples: []string{`discord-axi channels "My Server"`, "discord-axi channels 1234567890 --type text"},
 		Run: func(inv *axi.Invocation) (*axi.Doc, error) {
-			client, err := Client()
+			client, _, err := Client(inv)
 			if err != nil {
 				return nil, err
 			}
@@ -524,7 +374,7 @@ func dmsCommand() *axi.Command {
 		},
 		Examples: []string{"discord-axi dms"},
 		Run: func(inv *axi.Invocation) (*axi.Doc, error) {
-			token, err := Token()
+			client, credentials, err := Client(inv)
 			if err != nil {
 				return nil, err
 			}
@@ -532,13 +382,13 @@ func dmsCommand() *axi.Command {
 			if err != nil {
 				return nil, err
 			}
-			channels, err := NewClient(token).PrivateChannels()
+			channels, err := client.PrivateChannels()
 			if err != nil {
 				return nil, Translate(err)
 			}
 			if len(channels) == 0 {
 				empty := "0 direct message channels found"
-				if IsBot(token) {
+				if credentials.IsBot() {
 					empty = "0 direct message channels (bot accounts only see a DM after a user opens one)"
 				}
 				return axi.NewDoc().
@@ -579,7 +429,7 @@ func messagesCommand() *axi.Command {
 			"discord-axi messages 1234567890 --limit 50 --fields reactions,url",
 		},
 		Run: func(inv *axi.Invocation) (*axi.Doc, error) {
-			client, err := Client()
+			client, _, err := Client(inv)
 			if err != nil {
 				return nil, err
 			}
@@ -683,8 +533,11 @@ func sendCommand() *axi.Command {
 			`discord-axi send 1234567890 --content "on it" --reply 9876543210`,
 		},
 		Run: func(inv *axi.Invocation) (*axi.Doc, error) {
-			client, err := Client()
+			client, credentials, err := Client(inv)
 			if err != nil {
+				return nil, err
+			}
+			if err := RequireWrite(credentials); err != nil {
 				return nil, err
 			}
 			channel, err := ResolveChannel(client, inv.Arg(0))
@@ -736,8 +589,11 @@ func editCommand() *axi.Command {
 		},
 		Examples: []string{`discord-axi edit "My Server/general" 9876543210 --content "fixed typo"`},
 		Run: func(inv *axi.Invocation) (*axi.Doc, error) {
-			client, err := Client()
+			client, credentials, err := Client(inv)
 			if err != nil {
+				return nil, err
+			}
+			if err := RequireWrite(credentials); err != nil {
 				return nil, err
 			}
 			channel, messageID, err := channelAndMessage(client, inv)
@@ -762,8 +618,11 @@ func deleteCommand() *axi.Command {
 		Args:     []axi.Arg{{Name: "channel", Required: true}, {Name: "message", Required: true}},
 		Examples: []string{`discord-axi delete "My Server/general" 9876543210`},
 		Run: func(inv *axi.Invocation) (*axi.Doc, error) {
-			client, err := Client()
+			client, credentials, err := Client(inv)
 			if err != nil {
+				return nil, err
+			}
+			if err := RequireWrite(credentials); err != nil {
 				return nil, err
 			}
 			channel, messageID, err := channelAndMessage(client, inv)
@@ -798,8 +657,11 @@ func reactCommand() *axi.Command {
 			`discord-axi react 1234567890 9876543210 --emoji "✅" --remove`,
 		},
 		Run: func(inv *axi.Invocation) (*axi.Doc, error) {
-			client, err := Client()
+			client, credentials, err := Client(inv)
 			if err != nil {
+				return nil, err
+			}
+			if err := RequireWrite(credentials); err != nil {
 				return nil, err
 			}
 			channel, messageID, err := channelAndMessage(client, inv)
@@ -841,11 +703,11 @@ func searchCommand() *axi.Command {
 		},
 		Examples: []string{`discord-axi search "My Server" --content "deploy failed"`},
 		Run: func(inv *axi.Invocation) (*axi.Doc, error) {
-			token, err := Token()
+			client, credentials, err := Client(inv)
 			if err != nil {
 				return nil, err
 			}
-			if IsBot(token) {
+			if credentials.IsBot() {
 				return nil, axi.Fail("FORBIDDEN", "Discord does not offer message search to bot accounts",
 					"Run `"+axi.Binary()+` messages "<guild>/<channel>" --limit 100`+"` and filter the output")
 			}
@@ -853,7 +715,6 @@ func searchCommand() *axi.Command {
 			if err != nil {
 				return nil, err
 			}
-			client := NewClient(token)
 			guild, err := ResolveGuild(client, inv.Arg(0))
 			if err != nil {
 				return nil, err
@@ -917,9 +778,4 @@ func channelAndMessage(client *api.Client, inv *axi.Invocation) (ChannelRef, dis
 		return ChannelRef{}, 0, err
 	}
 	return channel, discord.MessageID(id), nil
-}
-
-func isUnauthorized(err error) bool {
-	var axiErr *axi.Error
-	return errors.As(Translate(err), &axiErr) && axiErr.Code == "NOT_AUTHENTICATED"
 }

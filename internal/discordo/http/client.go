@@ -18,8 +18,19 @@ import (
 )
 
 func NewClient(token string) *api.Client {
-	httpClient := httputil.NewClientWithDriver(wrapClient(tls.NewClient()))
-	client := api.NewCustomClient(token, httpClient)
+	return NewClientWithDriver(token, Driver())
+}
+
+// Driver exposes the browser-shaped HTTP driver so a caller can wrap it, for
+// example to refuse writes on a read-only account. Added for discord-axi.
+func Driver() httpdriver.Client {
+	return wrapClient(tls.NewClient())
+}
+
+// NewClientWithDriver builds the API client on a caller-supplied driver.
+// Added for discord-axi.
+func NewClientWithDriver(token string, driver httpdriver.Client) *api.Client {
+	client := api.NewCustomClient(token, httputil.NewClientWithDriver(driver))
 	client.UserAgent = BrowserUserAgent()
 	return client
 }

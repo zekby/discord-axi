@@ -19,6 +19,9 @@ type App struct {
 	// Home runs with no arguments and shows live content, not a manual.
 	Home     func() (*Doc, error)
 	Commands []*Command
+	// GlobalFlags are accepted by every command and are never reported as
+	// unknown, the way `--help` is.
+	GlobalFlags []Flag
 	// HelpNotes are shown under the top-level command list.
 	HelpNotes []string
 }
@@ -75,10 +78,10 @@ func (a *App) Run(argv []string, out io.Writer) int {
 
 	args := argv[1:]
 	if slices.Contains(args, "--help") || slices.Contains(args, "-h") {
-		return write(out, command.Help(), ExitOK)
+		return write(out, command.Help(a.GlobalFlags...), ExitOK)
 	}
 
-	invocation, err := command.Parse(args)
+	invocation, err := command.Parse(args, a.GlobalFlags...)
 	if err != nil {
 		return write(out, ErrorDoc(err), ExitCode(err))
 	}
@@ -105,11 +108,18 @@ func (a *App) Help() *Doc {
 			Set("usage", command.Usage()).
 			Set("description", command.Desc))
 	}
-	return NewDoc().
+	doc := NewDoc().
 		Set(a.Name, a.Description).
 		Set("version", a.Version).
-		Set("commands", rows).
-		Set("help", a.HelpNotes)
+		Set("commands", rows)
+	if len(a.GlobalFlags) > 0 {
+		globals := NewDoc()
+		for _, flag := range a.GlobalFlags {
+			globals.Set(flag.Name+flagPlaceholder(flag), flag.Desc)
+		}
+		doc.Set("globals", globals)
+	}
+	return doc.Set("help", a.HelpNotes)
 }
 
 func mergeDocs(docs ...*Doc) *Doc {
