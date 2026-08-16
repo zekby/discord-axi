@@ -310,6 +310,23 @@ func TestUnknownFieldNamesTheAvailableOnes(t *testing.T) {
 	}
 }
 
+// Discord's REST message payload omits guild_id, so the jump url has to take it
+// from the resolved channel or it points at @me and does not open.
+func TestJumpURLsPointAtTheGuildNotAtDirectMessages(t *testing.T) {
+	mockDiscord(t, discordAPI(t, nil))
+
+	out, code := run(t, "messages", "Acme/general", "--fields", "url")
+	if code != 0 {
+		t.Fatalf("exit code = %d:\n%s", code, out)
+	}
+	if strings.Contains(out, "/channels/@me/") {
+		t.Fatalf("guild message urls must carry the guild id:\n%s", out)
+	}
+	if !strings.Contains(out, "https://discord.com/channels/"+guildID+"/"+generalID+"/300") {
+		t.Fatalf("url is missing or malformed:\n%s", out)
+	}
+}
+
 func TestRequestedFieldsAreAppendedToTheSchema(t *testing.T) {
 	mockDiscord(t, discordAPI(t, nil))
 

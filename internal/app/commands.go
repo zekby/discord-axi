@@ -583,6 +583,15 @@ func messagesCommand() *axi.Command {
 			rows := make([]*axi.Doc, 0, len(messages))
 			for i := len(messages) - 1; i >= 0; i-- {
 				message := messages[i]
+				// The REST message payload carries no guild id, so a jump url built
+				// from it alone would point at @me instead of the guild. The
+				// resolved channel is the authority for both ids.
+				if !message.GuildID.IsValid() {
+					message.GuildID = channel.Channel.GuildID
+				}
+				if !message.ChannelID.IsValid() {
+					message.ChannelID = channel.Channel.ID
+				}
 				body, cut := truncate(message.Content, full)
 				truncated = truncated || cut
 				rows = append(rows, messageFields.apply(
